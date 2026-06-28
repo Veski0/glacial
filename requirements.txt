@@ -1,0 +1,6 @@
+# Runtime/development dependencies for the Glacial prototype.
+# Transformers 4.47.0 matches the Granite 3.1 instruct config and source inspected during development.
+torch>=2.2
+transformers==4.47.0
+huggingface_hub>=0.24
+safetensors>=0.4

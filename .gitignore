@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Generated traces, checkpoints, and local model caches
+traces/
+runs/
+models/
+.cache/
+
+# Editor
+.ion
