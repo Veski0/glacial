@@ -161,6 +161,7 @@ tests/
 - [`docs/backend-abstraction.md`](docs/backend-abstraction.md) — backend boundary
 - [`docs/mental-model.md`](docs/mental-model.md) — how to think about Glacial
 - [`docs/granite-reference.md`](docs/granite-reference.md) — Granite-specific reference notes
+- [`docs/gemma4-reference.md`](docs/gemma4-reference.md) — Gemma 4 architecture reference (WIP)
 - [`docs/vision.md`](docs/vision.md) — project direction
 
 ## Important invariants
@@ -171,7 +172,7 @@ tests/
 
 ## Caveats
 
-- Current backend: Granite MoE only.
+- Current backend: Granite MoE + Gemma 4 (stub).
 - Current sampler: greedy + temperature/top-k/top-p with seed-in-persistence.
 - No batching or request scheduler.
 - The API shim serializes generation through one engine lock.

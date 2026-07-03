@@ -5,9 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from glacial.backends.base import CausalLMBackend
+from glacial.backends.gemma4 import Gemma4Backend
 from glacial.backends.granite import GraniteMoeBackend
 
-_BACKENDS: tuple[CausalLMBackend, ...] = (GraniteMoeBackend(),)
+_BACKENDS: tuple[CausalLMBackend, ...] = (GraniteMoeBackend(), Gemma4Backend())
 
 
 def available_backends() -> tuple[CausalLMBackend, ...]:
