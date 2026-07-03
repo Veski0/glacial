@@ -214,37 +214,14 @@ def make_module_io_hook(*, event: str, layer_idx: int, records: dict[int, dict[s
     return hook
 
 
-def make_router_hook(*, layer_idx: int, config, batch_size: int, seq_len: int,
-                     max_inline_elements: int, router_records: dict[int, dict[str, Any]]):
-    """Capture LFM2 MoE router details (sigmoid + expert_bias + top-k)."""
+def make_router_logit_hook(*, layer_idx: int, records: dict[int, dict[str, Any]]):
+    """Capture router logits from the gate Linear module."""
     def hook(module, inputs, output):
-        import torch
-        hidden_in = inputs[0]
-        router_logits, routing_weights, selected_experts = output
-
-        top_k = int(getattr(config, "num_experts_per_tok"))
-        num_experts = int(getattr(config, "num_experts"))
-        use_expert_bias = bool(getattr(config, "use_expert_bias", False))
-
-        router_records[layer_idx] = {
-            "event": "layer_router",
+        records[layer_idx] = {
+            "event": "layer_router_logits",
             "layer": layer_idx,
-            "router_input": tensor_summary(hidden_in),
-            "router_logits": tensor_summary(router_logits),
-            "routing_weights": tensor_summary(routing_weights),
-            "selected_experts_shape": [batch_size, seq_len, top_k],
-            "selected_experts": maybe_inline_tensor(
-                selected_experts.view(batch_size, seq_len, top_k) if selected_experts.dim() == 2 else selected_experts,
-                max_elements=max_inline_elements,
-            ),
-            "routing_weights_inline": maybe_inline_tensor(
-                routing_weights.view(batch_size, seq_len, top_k) if routing_weights.dim() == 2 else routing_weights,
-                max_elements=max_inline_elements,
-                as_float=True,
-            ),
-            "use_expert_bias": use_expert_bias,
-            "num_experts": num_experts,
-            "top_k": top_k,
+            "input": tensor_summary(inputs[0]),
+            "router_logits": tensor_summary(output),
         }
     return hook
 
@@ -272,15 +249,21 @@ def make_layer_hook(*, layer_idx: int, layer_records: dict[int, dict[str, Any]])
     return hook
 
 
-def patch_lfm2_rotary(*, records: dict[int, dict[str, Any]]):
-    """Patch LFM2's apply_rotary_pos_emb so the trace can see q/k after rotation."""
+def patch_lfm2_rotary(*, records: dict[int, dict[str, Any]], attention_layer_indices: list[int]):
+    """Patch LFM2's apply_rotary_pos_emb so the trace can see q/k after rotation.
+
+    Unlike Granite (where all layers are attention layers), LFM2 only has 6
+    attention layers. The call_count maps to the attention layer indices, not
+    the sequential layer index.
+    """
     from transformers.models.lfm2_moe import modeling_lfm2_moe
     original = modeling_lfm2_moe.apply_rotary_pos_emb
     call_count = {"value": 0}
 
     def wrapped(q, k, cos, sin, unsqueeze_dim=1):
-        layer_idx = call_count["value"]
+        idx = call_count["value"]
         call_count["value"] += 1
+        layer_idx = attention_layer_indices[idx] if idx < len(attention_layer_indices) else idx
         q_out, k_out = original(q, k, cos, sin, unsqueeze_dim=unsqueeze_dim)
         records[layer_idx] = {
             "event": "layer_attention_rotary",
@@ -466,12 +449,7 @@ def main() -> int:
                 # MoE layer
                 handles.append(
                     layer.feed_forward.gate.register_forward_hook(
-                        make_router_hook(
-                            layer_idx=layer_idx, config=model.config,
-                            batch_size=batch_size, seq_len=seq_len,
-                            max_inline_elements=args.max_inline_elements,
-                            router_records=router_records,
-                        )
+                        make_router_logit_hook(layer_idx=layer_idx, records=router_records)
                     )
                 )
                 handles.append(
@@ -499,7 +477,7 @@ def main() -> int:
             f"Could not attach LFM2 MoE hooks: {exc}. Is this an Lfm2MoeForCausalLM architecture?"
         ) from exc
 
-    restore_rotary = patch_lfm2_rotary(records=rotary_records)
+    restore_rotary = patch_lfm2_rotary(records=rotary_records, attention_layer_indices=attention_layer_indices)
 
     # Also hook the embedding output (before any layers)
     embedding_records: dict[str, dict[str, Any]] = {}
