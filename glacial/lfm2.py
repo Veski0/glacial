@@ -195,7 +195,7 @@ def run_short_conv(
 
             # Save conv state: last L_cache-1 Bx values for decode
             # conv_state shape: [hidden, L_cache] (need L_cache values for kernel size 3)
-            final_state = Bx[0, :, -L_cache:].transpose(0, 1)  # [hidden, L_cache]
+            final_state = Bx[0, :, -L_cache:].contiguous()  # [hidden, L_cache]
 
         y = C * conv_out  # output gate [batch, hidden, seq]
         y = y.transpose(-1, -2).contiguous()  # [batch, seq, hidden]
