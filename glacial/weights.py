@@ -294,6 +294,34 @@ class SafetensorsWeights:
             yield tensor
 
     @contextmanager
+    def tensor_any(self, tensor_name: str):
+        """Read a tensor of any dtype (not just BF16).
+
+        Needed for tensors like LFM2's expert_bias which is stored as F32.
+        """
+        import torch
+
+        meta = self.meta(tensor_name)
+        dtype_str = meta["dtype"]
+        shape = [int(x) for x in meta["shape"]]
+        data_offsets = [int(x) for x in meta["data_offsets"]]
+
+        dtype_map = {"BF16": torch.bfloat16, "F32": torch.float32, "F16": torch.float16}
+        torch_dtype = dtype_map.get(dtype_str)
+        if torch_dtype is None:
+            raise SystemExit(f"Unsupported dtype {dtype_str} for tensor {tensor_name}")
+
+        byte_size = int(data_offsets[1]) - int(data_offsets[0])
+        with self.path.open("rb") as f:
+            f.seek(self.payload_start + int(data_offsets[0]))
+            raw = f.read(byte_size)
+        if len(raw) != byte_size:
+            raise SystemExit(f"Short read for {tensor_name}")
+        tensor = torch.frombuffer(bytearray(raw), dtype=torch_dtype).clone().view(*shape)
+        with self._resident_tensor(tensor, name=tensor_name):
+            yield tensor
+
+    @contextmanager
     def embedding_rows(self, rows: list[int]):
         tensor, hidden_size = read_embedding_rows(
             self.path,

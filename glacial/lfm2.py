@@ -415,9 +415,11 @@ def run_experts(
             peak_expert_pair_bytes = max(peak_expert_pair_bytes, expert_bytes)
             selected_expert_ids.append(expert_idx)
 
-            gate = F.linear(current_state, w1)   # [num_selected, intermediate]
-            up = F.linear(current_state, w3)     # [num_selected, intermediate]
-            hidden = F.silu(gate) * up            # SwiGLU activation
+            # Match HF's combined gate_up_proj matmul to avoid BF16 BLAS dispatch differences
+            gate_up = torch.cat([w1, w3], dim=0)  # [2*intermediate, hidden]
+            gate_up_out = F.linear(current_state, gate_up)  # [num_selected, 2*intermediate]
+            gate, up = gate_up_out.chunk(2, dim=-1)
+            hidden = F.silu(gate) * up
             output = F.linear(hidden, w2)         # [num_selected, hidden]
 
             # Scale by routing weights
@@ -574,7 +576,7 @@ def run_layer_with_optional_state(
         expert_bias = None
         if use_expert_bias:
             bias_name = layer_tensor(layer_idx, "feed_forward.expert_bias")
-            with provider.tensor(bias_name) as bias_weight:
+            with provider.tensor_any(bias_name) as bias_weight:
                 expert_bias = bias_weight.float()
 
         with provider.tensor(gate_name) as gate_weight:
