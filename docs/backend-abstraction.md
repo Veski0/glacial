@@ -47,9 +47,32 @@ Currently available:
 granite    IBM Granite MoE path proven against HF traces
 ```
 
+## Module layout
+
+The architecture boundary is now clean:
+
+```text
+glacial/
+  generate.py     shared utilities (embed, input formatting, telemetry)
+  logits.py       shared chunked LM head + greedy argmax helpers
+  weights.py      safetensors loading + WeightBudget
+  sampler.py      token sampler with checkpointable RNG state
+  kv.py           checkpoint save/load/resume
+  granite.py      Granite MoE layer math (private to backend)
+  backends/
+    base.py       CausalLMBackend protocol
+    granite.py    Granite backend (owns ALL Granite decode logic)
+    __init__.py   backend registry / auto resolver
+```
+
+The shared modules (``generate.py``, ``logits.py``) have **zero** architecture-specific
+imports. The Granite math module (``granite.py``) is only imported by the backend
+and by development probe tools. The runtime (CLI, server, tests) talks only to
+the ``CausalLMBackend`` protocol.
+
 ## Adding a backend
 
-A future backend should add a module under:
+A new backend should add a module under:
 
 ```text
 glacial/backends/<name>.py
@@ -61,4 +84,7 @@ Then register it in:
 glacial/backends/__init__.py
 ```
 
-The existing Granite backend is intentionally thin for now: it adapts the proven `glacial.generate` / `glacial.granite` implementation to the backend interface. Future cleanup can move Granite-specific generation helpers under `glacial/backends/granite.py` without changing the runtime call sites.
+The backend owns all architecture-specific execution: layer math, final norm,
+LM head, and the prefill/decode loop. It can reuse the shared utilities in
+``generate.py`` and ``logits.py`` but must not leak architecture-specific code
+into them.

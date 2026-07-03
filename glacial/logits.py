@@ -1,11 +1,10 @@
-"""Final norm, chunked tied-LM-head, and greedy helpers."""
+"""Shared logits and greedy selection helpers for Glacial backends."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
 
-from glacial.granite import FINAL_NORM_TENSOR, granite_rmsnorm
 from glacial.weights import BF16_BYTES, EMBED_TENSOR, SafetensorsWeights, WeightBudget
 
 
@@ -117,57 +116,3 @@ def chunked_last_argmax(
         "visited_lm_head_bytes": visited_lm_head_bytes,
         "chunk_rows": chunk_rows,
     }
-
-
-def final_hidden_to_logits(
-    *,
-    hidden,
-    model_file: Path,
-    header: dict[str, Any],
-    payload_start: int,
-    scalars: dict[str, float],
-    chunk_rows: int,
-    budget: WeightBudget | None = None,
-):
-    provider = SafetensorsWeights(model_file, header=header, payload_start=payload_start, budget=budget)
-    with provider.tensor(FINAL_NORM_TENSOR) as final_norm_weight:
-        final_hidden = granite_rmsnorm(hidden, final_norm_weight, eps=scalars["rms_norm_eps"])
-        final_norm_weight_bytes = final_norm_weight.numel() * BF16_BYTES
-    logits, telemetry = chunked_last_logits(
-        final_hidden=final_hidden,
-        model_file=model_file,
-        header=header,
-        payload_start=payload_start,
-        chunk_rows=chunk_rows,
-        logits_scaling=scalars["logits_scaling"],
-        budget=budget,
-    )
-    telemetry["final_norm_weight_bytes"] = final_norm_weight_bytes
-    return final_hidden, logits, telemetry
-
-
-def final_hidden_to_greedy(
-    *,
-    hidden,
-    model_file: Path,
-    header: dict[str, Any],
-    payload_start: int,
-    scalars: dict[str, float],
-    chunk_rows: int,
-    budget: WeightBudget | None = None,
-):
-    provider = SafetensorsWeights(model_file, header=header, payload_start=payload_start, budget=budget)
-    with provider.tensor(FINAL_NORM_TENSOR) as final_norm_weight:
-        final_hidden = granite_rmsnorm(hidden, final_norm_weight, eps=scalars["rms_norm_eps"])
-        final_norm_weight_bytes = final_norm_weight.numel() * BF16_BYTES
-    token_id, telemetry = chunked_last_argmax(
-        final_hidden=final_hidden,
-        model_file=model_file,
-        header=header,
-        payload_start=payload_start,
-        chunk_rows=chunk_rows,
-        logits_scaling=scalars["logits_scaling"],
-        budget=budget,
-    )
-    telemetry["final_norm_weight_bytes"] = final_norm_weight_bytes
-    return final_hidden, token_id, telemetry

@@ -19,7 +19,7 @@ if str(ROOT) not in sys.path:
 
 from glacial.generate import embed_input_ids
 from glacial.granite import FINAL_NORM_TENSOR, required_layer_tensors, run_layer_with_optional_kv, scalar_config
-from glacial.logits import final_hidden_to_logits
+from glacial.backends.granite import _final_hidden_to_logits as final_hidden_to_logits
 from probe_embedding import (
     EMBED_TENSOR,
     compare_summaries,

@@ -78,7 +78,7 @@ Most useful next steps:
 3. ~~Resume parity smoke script / integration test.~~ ✅ Done.
 4. ~~Slow integration test harness for probes.~~ ✅ Done (greedy + resume parity).
 5. ~~Sampling with exact RNG/state semantics.~~ ✅ Done.
-6. Move Granite-specific generation helpers fully under backend module.
+6. ~~Move Granite-specific generation helpers fully under backend module.~~ ✅ Done.
 7. Add a second architecture backend.
 8. Packaging / CLI polish.
 ```

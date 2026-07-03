@@ -134,10 +134,10 @@ Tests:
 ```text
 glacial/
   weights.py            safetensors byte-range loading + budget accounting
-  granite.py            Granite MoE layer math
-  logits.py             final norm, chunked LM head, greedy argmax
+  granite.py            Granite MoE layer math (private to backend)
+  logits.py             shared chunked LM head + greedy argmax helpers
   sampler.py            token sampler with checkpointable RNG state
-  generate.py           prefill/decode generation helpers
+  generate.py           shared generation utilities (embed, inputs, telemetry)
   kv.py                 durable decode checkpoints
   backends/             backend protocol and Granite adapter
 
