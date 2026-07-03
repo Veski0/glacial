@@ -45,7 +45,7 @@ Currently available:
 
 ```text
 granite    IBM Granite MoE path proven against HF traces
-gemma4     Google Gemma 4 dense (stub — math not yet implemented)
+lfm2       Liquid LFM2.5 MoE (stub — math not yet implemented)
 ```
 
 ## Module layout

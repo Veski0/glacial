@@ -160,8 +160,8 @@ tests/
 - [`docs/resumable-decode.md`](docs/resumable-decode.md) — checkpoint semantics
 - [`docs/backend-abstraction.md`](docs/backend-abstraction.md) — backend boundary
 - [`docs/mental-model.md`](docs/mental-model.md) — how to think about Glacial
-- [`docs/granite-reference.md`](docs/granite-reference.md) — Granite-specific reference notes
-- [`docs/gemma4-reference.md`](docs/gemma4-reference.md) — Gemma 4 architecture reference (WIP)
+- [`docs/gemma4-reference.md`](docs/gemma4-reference.md) — Gemma 4 architecture reference (research, not pursued — dense, not MoE)
+- [`docs/lfm2-reference.md`](docs/lfm2-reference.md) — LFM2.5-8B-A1B architecture reference (WIP — MoE, second backend target)
 - [`docs/vision.md`](docs/vision.md) — project direction
 
 ## Important invariants
@@ -172,7 +172,7 @@ tests/
 
 ## Caveats
 
-- Current backend: Granite MoE + Gemma 4 (stub).
+- Current backend: Granite MoE + LFM2.5 MoE (stub).
 - Current sampler: greedy + temperature/top-k/top-p with seed-in-persistence.
 - No batching or request scheduler.
 - The API shim serializes generation through one engine lock.

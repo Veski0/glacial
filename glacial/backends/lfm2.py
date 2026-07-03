@@ -1,21 +1,23 @@
-"""Gemma 4 backend stub for Glacial.
+"""LFM2 MoE backend stub for Glacial.
 
-This backend is under development.  The architecture reference is in
-``docs/gemma4-reference.md``.
+This backend targets LiquidAI/LFM2.5-8B-A1B — a hybrid conv/attention MoE
+model with 32 experts (4 active).  The architecture reference is in
+``docs/lfm2-reference.md``.
 
 Implementation plan (one operation at a time, same as Granite):
 
 1. Safetensors header inspection — verify tensor names and shapes
-2. Embedding + PLE lookup
-3. RMSNorm (Gemma variant)
-4. Q/K/V projections (sliding vs global head dims)
-5. RoPE (standard for sliding, p-RoPE for global)
-6. Sliding window attention + global attention
-7. KV sharing for global layers
-8. GELU SwiGLU MLP
-9. Final norm + logit softcap + chunked tied LM head
-10. Prefill / decode loop
-11. Parity probes against HF traces
+2. Embedding (no multiplier) + final norm
+3. RMSNorm (same variant as Granite)
+4. Dense MLP (SwiGLU, layers 0-1)
+5. Short conv (gated depthwise conv1d + conv state)
+6. Attention with Q/K layernorm + RoPE
+7. MoE router (sigmoid + expert_bias + top-k)
+8. MoE experts (combined gate_up_proj, SiLU)
+9. Final norm + chunked tied LM head (no softcap, logits_scaling=1.0)
+10. Prefill / decode loop (conv state + KV cache for 6 attention layers)
+11. Checkpoint format (conv state + KV for attention layers only)
+12. Parity probes against HF traces
 """
 
 from __future__ import annotations
@@ -27,23 +29,21 @@ from glacial.sampler import Sampler
 from glacial.weights import WeightBudget
 
 
-class Gemma4Backend:
-    """Backend for Google Gemma 4 dense models (text decode path).
+class Lfm2MoeBackend:
+    """Backend for Liquid LFM2.5 MoE models.
 
-    Status: stub.  Math not yet implemented.
+    Status: stub.  Math not yet implemented.  See docs/lfm2-reference.md.
     """
 
-    name = "gemma4"
+    name = "lfm2"
 
     def supports_config(self, config: dict[str, Any]) -> bool:
-        # The full model config nests text_config; also handle bare text configs.
-        text_config = config.get("text_config", config)
-        model_type = str(text_config.get("model_type", "")).lower()
+        model_type = str(config.get("model_type", "")).lower()
         architectures = [str(x).lower() for x in config.get("architectures", [])]
         return (
-            model_type == "gemma4_text"
-            or model_type == "gemma4"
-            or any("gemma4" in arch for arch in architectures)
+            model_type == "lfm2_moe"
+            or model_type == "lfm2"
+            or any("lfm2" in arch for arch in architectures)
         )
 
     def next_token_greedy(
@@ -58,7 +58,7 @@ class Gemma4Backend:
         budget: WeightBudget | None = None,
         sampler: Sampler | None = None,
     ) -> tuple[int, dict[str, Any]]:
-        raise NotImplementedError("Gemma 4 backend is not yet implemented")
+        raise NotImplementedError("LFM2 MoE backend is not yet implemented")
 
     def prefill_kv_greedy(
         self,
@@ -72,7 +72,7 @@ class Gemma4Backend:
         budget: WeightBudget | None = None,
         sampler: Sampler | None = None,
     ) -> tuple[int, list[tuple[Any, Any]], dict[str, Any]]:
-        raise NotImplementedError("Gemma 4 backend is not yet implemented")
+        raise NotImplementedError("LFM2 MoE backend is not yet implemented")
 
     def decode_kv_greedy(
         self,
@@ -88,4 +88,4 @@ class Gemma4Backend:
         budget: WeightBudget | None = None,
         sampler: Sampler | None = None,
     ) -> tuple[int, list[tuple[Any, Any]], dict[str, Any]]:
-        raise NotImplementedError("Gemma 4 backend is not yet implemented")
+        raise NotImplementedError("LFM2 MoE backend is not yet implemented")
