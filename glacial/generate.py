@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from glacial.granite import run_layer, run_layer_with_optional_kv, scalar_config
-from glacial.logits import final_hidden_to_greedy
+from glacial.logits import final_hidden_to_greedy, final_hidden_to_logits
+from glacial.sampler import Sampler
 from glacial.weights import BF16_BYTES, EMBED_TENSOR, SafetensorsWeights, WeightBudget
 
 
@@ -83,8 +84,13 @@ def next_token_greedy(
     config: dict[str, Any],
     lm_head_chunk_rows: int,
     budget: WeightBudget | None = None,
+    sampler: Sampler | None = None,
 ) -> tuple[int, dict[str, Any]]:
-    """Slow no-KV greedy path: recompute full prompt for each token."""
+    """Slow no-KV greedy path: recompute full prompt for each token.
+
+    If ``sampler`` is provided and is non-greedy, the full logit vector is
+    materialized (via ``final_hidden_to_logits``) and the sampler selects the
+    token.  Otherwise the streaming argmax path is used (no full logits)."""
 
     scalars = scalar_config(config)
     inputs = make_inputs(token_ids)
@@ -114,15 +120,27 @@ def next_token_greedy(
         layer_stats.append(stats)
         cumulative_weight_bytes += stats["loaded_nonexpert_bytes"] + stats["cumulative_expert_weight_bytes"]
 
-    _final_hidden, next_id, lm_telemetry = final_hidden_to_greedy(
-        hidden=hidden,
-        model_file=model_file,
-        header=header,
-        payload_start=payload_start,
-        scalars=scalars,
-        chunk_rows=lm_head_chunk_rows,
-        budget=budget,
-    )
+    if sampler is not None and not sampler.is_greedy():
+        _final_hidden, logits, lm_telemetry = final_hidden_to_logits(
+            hidden=hidden,
+            model_file=model_file,
+            header=header,
+            payload_start=payload_start,
+            scalars=scalars,
+            chunk_rows=lm_head_chunk_rows,
+            budget=budget,
+        )
+        next_id = sampler.sample(logits)
+    else:
+        _final_hidden, next_id, lm_telemetry = final_hidden_to_greedy(
+            hidden=hidden,
+            model_file=model_file,
+            header=header,
+            payload_start=payload_start,
+            scalars=scalars,
+            chunk_rows=lm_head_chunk_rows,
+            budget=budget,
+        )
     cumulative_weight_bytes += lm_telemetry["final_norm_weight_bytes"] + lm_telemetry["visited_lm_head_bytes"]
     telemetry = {
         "phase": "full",
@@ -146,7 +164,13 @@ def prefill_kv_greedy(
     config: dict[str, Any],
     lm_head_chunk_rows: int,
     budget: WeightBudget | None = None,
+    sampler: Sampler | None = None,
 ) -> tuple[int, list[tuple[Any, Any]], dict[str, Any]]:
+    """Prefill prompt KV and return the first generated token.
+
+    If ``sampler`` is provided and is non-greedy, the full logit vector is
+    materialized and the sampler selects the token.  Otherwise the streaming
+    argmax path is used."""
     scalars = scalar_config(config)
     inputs = make_inputs(token_ids)
     hidden, embed_bytes = embed_input_ids(
@@ -178,15 +202,27 @@ def prefill_kv_greedy(
         layer_stats.append(stats)
         visited_before_lm += stats["loaded_nonexpert_bytes"] + stats["cumulative_expert_weight_bytes"]
 
-    _final_hidden, next_id, lm_telemetry = final_hidden_to_greedy(
-        hidden=hidden,
-        model_file=model_file,
-        header=header,
-        payload_start=payload_start,
-        scalars=scalars,
-        chunk_rows=lm_head_chunk_rows,
-        budget=budget,
-    )
+    if sampler is not None and not sampler.is_greedy():
+        _final_hidden, logits, lm_telemetry = final_hidden_to_logits(
+            hidden=hidden,
+            model_file=model_file,
+            header=header,
+            payload_start=payload_start,
+            scalars=scalars,
+            chunk_rows=lm_head_chunk_rows,
+            budget=budget,
+        )
+        next_id = sampler.sample(logits)
+    else:
+        _final_hidden, next_id, lm_telemetry = final_hidden_to_greedy(
+            hidden=hidden,
+            model_file=model_file,
+            header=header,
+            payload_start=payload_start,
+            scalars=scalars,
+            chunk_rows=lm_head_chunk_rows,
+            budget=budget,
+        )
     telemetry = {
         "phase": "prefill",
         "visited_before_lm_head_bytes": visited_before_lm,
@@ -213,7 +249,13 @@ def decode_kv_greedy(
     config: dict[str, Any],
     lm_head_chunk_rows: int,
     budget: WeightBudget | None = None,
+    sampler: Sampler | None = None,
 ) -> tuple[int, list[tuple[Any, Any]], dict[str, Any]]:
+    """Decode one token against existing KV and return the next token.
+
+    If ``sampler`` is provided and is non-greedy, the full logit vector is
+    materialized and the sampler selects the token.  Otherwise the streaming
+    argmax path is used."""
     scalars = scalar_config(config)
     inputs = make_decode_inputs(input_token_id, position=position)
     hidden, embed_bytes = embed_input_ids(
@@ -245,15 +287,27 @@ def decode_kv_greedy(
         layer_stats.append(stats)
         visited_before_lm += stats["loaded_nonexpert_bytes"] + stats["cumulative_expert_weight_bytes"]
 
-    _final_hidden, next_id, lm_telemetry = final_hidden_to_greedy(
-        hidden=hidden,
-        model_file=model_file,
-        header=header,
-        payload_start=payload_start,
-        scalars=scalars,
-        chunk_rows=lm_head_chunk_rows,
-        budget=budget,
-    )
+    if sampler is not None and not sampler.is_greedy():
+        _final_hidden, logits, lm_telemetry = final_hidden_to_logits(
+            hidden=hidden,
+            model_file=model_file,
+            header=header,
+            payload_start=payload_start,
+            scalars=scalars,
+            chunk_rows=lm_head_chunk_rows,
+            budget=budget,
+        )
+        next_id = sampler.sample(logits)
+    else:
+        _final_hidden, next_id, lm_telemetry = final_hidden_to_greedy(
+            hidden=hidden,
+            model_file=model_file,
+            header=header,
+            payload_start=payload_start,
+            scalars=scalars,
+            chunk_rows=lm_head_chunk_rows,
+            budget=budget,
+        )
     telemetry = {
         "phase": "decode",
         "position": position,

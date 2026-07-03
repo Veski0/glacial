@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from glacial.generate import decode_kv_greedy, next_token_greedy, prefill_kv_greedy
+from glacial.sampler import Sampler
 from glacial.weights import WeightBudget
 
 
@@ -33,6 +34,7 @@ class GraniteMoeBackend:
         config: dict[str, Any],
         lm_head_chunk_rows: int,
         budget: WeightBudget | None = None,
+        sampler: Sampler | None = None,
     ) -> tuple[int, dict[str, Any]]:
         return next_token_greedy(
             token_ids=token_ids,
@@ -42,6 +44,7 @@ class GraniteMoeBackend:
             config=config,
             lm_head_chunk_rows=lm_head_chunk_rows,
             budget=budget,
+            sampler=sampler,
         )
 
     def prefill_kv_greedy(
@@ -54,6 +57,7 @@ class GraniteMoeBackend:
         config: dict[str, Any],
         lm_head_chunk_rows: int,
         budget: WeightBudget | None = None,
+        sampler: Sampler | None = None,
     ) -> tuple[int, list[tuple[Any, Any]], dict[str, Any]]:
         return prefill_kv_greedy(
             token_ids=token_ids,
@@ -63,6 +67,7 @@ class GraniteMoeBackend:
             config=config,
             lm_head_chunk_rows=lm_head_chunk_rows,
             budget=budget,
+            sampler=sampler,
         )
 
     def decode_kv_greedy(
@@ -77,6 +82,7 @@ class GraniteMoeBackend:
         config: dict[str, Any],
         lm_head_chunk_rows: int,
         budget: WeightBudget | None = None,
+        sampler: Sampler | None = None,
     ) -> tuple[int, list[tuple[Any, Any]], dict[str, Any]]:
         return decode_kv_greedy(
             input_token_id=input_token_id,
@@ -88,4 +94,5 @@ class GraniteMoeBackend:
             config=config,
             lm_head_chunk_rows=lm_head_chunk_rows,
             budget=budget,
+            sampler=sampler,
         )

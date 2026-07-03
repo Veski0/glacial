@@ -7,6 +7,11 @@ from typing import Any, Protocol
 
 from glacial.weights import WeightBudget
 
+try:
+    from glacial.sampler import Sampler
+except ImportError:  # allow standalone use without the sampler module
+    Sampler = None  # type: ignore[assignment, misc]
+
 
 class CausalLMBackend(Protocol):
     """Architecture-specific execution hooks used by generic runtimes.
@@ -31,6 +36,7 @@ class CausalLMBackend(Protocol):
         config: dict[str, Any],
         lm_head_chunk_rows: int,
         budget: WeightBudget | None = None,
+        sampler: "Sampler | None" = None,
     ) -> tuple[int, dict[str, Any]]:
         """No-KV fallback: recompute the full prompt and return greedy token."""
 
@@ -44,8 +50,9 @@ class CausalLMBackend(Protocol):
         config: dict[str, Any],
         lm_head_chunk_rows: int,
         budget: WeightBudget | None = None,
+        sampler: "Sampler | None" = None,
     ) -> tuple[int, list[tuple[Any, Any]], dict[str, Any]]:
-        """Prefill prompt KV and return the first greedy generated token."""
+        """Prefill prompt KV and return the first generated token."""
 
     def decode_kv_greedy(
         self,
@@ -59,5 +66,6 @@ class CausalLMBackend(Protocol):
         config: dict[str, Any],
         lm_head_chunk_rows: int,
         budget: WeightBudget | None = None,
+        sampler: "Sampler | None" = None,
     ) -> tuple[int, list[tuple[Any, Any]], dict[str, Any]]:
-        """Decode one token against existing KV and return next greedy token."""
+        """Decode one token against existing KV and return next token."""

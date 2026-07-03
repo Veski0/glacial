@@ -147,13 +147,18 @@ def save_decode_checkpoint(
     messages: Any | None,
     config: dict[str, Any],
     lm_head_chunk_rows: int,
+    sampler: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Persist a resumable greedy-KV decode checkpoint.
+    """Persist a resumable decode checkpoint.
 
     Atomicity model: each checkpoint is written to a new immutable snapshot
     directory. ``manifest.json`` is replaced only after the snapshot is fully
     written, so resume sees either the previous complete checkpoint or the new
     complete checkpoint.
+
+    The ``sampler`` dict (if provided) is stored in the manifest so that
+    resumed generation reproduces the exact same sampled sequence.  For greedy
+    checkpoints, pass ``None`` or a dict with ``type="greedy"``.
     """
 
     from safetensors.torch import save_file
@@ -219,6 +224,7 @@ def save_decode_checkpoint(
     if messages is not None:
         prompt["messages"] = messages
 
+    sampler_info: dict[str, Any] = sampler or {}
     manifest = {
         "schema_version": CHECKPOINT_SCHEMA_VERSION,
         "checkpoint_kind": CHECKPOINT_KIND,
@@ -234,9 +240,13 @@ def save_decode_checkpoint(
         },
         "prompt": prompt,
         "sampler": {
-            "type": "greedy",
+            "type": sampler_info.get("type", "greedy"),
+            "temperature": sampler_info.get("temperature"),
+            "top_k": sampler_info.get("top_k"),
+            "top_p": sampler_info.get("top_p"),
+            "seed": sampler_info.get("seed"),
+            "rng_state": sampler_info.get("rng_state"),
             "lm_head_chunk_rows": int(lm_head_chunk_rows),
-            "rng_state": None,
         },
         "state": {
             "token_count": len(token_ids),

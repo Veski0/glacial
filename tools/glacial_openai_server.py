@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """OpenAI-compatible chat API shim for Glacial.
 
-This is deliberately a small compatibility wrapper around the exact greedy
+This is deliberately a small compatibility wrapper around the exact
 prototype, not a high-throughput inference server. It exposes enough of the
 OpenAI Chat Completions shape for local tools to talk to Glacial via:
 
     POST /v1/chat/completions
     GET  /v1/models
 
-Generation is serialized through one engine lock. Sampling knobs are accepted
-for client compatibility but ignored: Glacial currently generates exact greedy
-text only.
+Generation is serialized through one engine lock. Sampling (temperature,
+top-p) is supported with checkpointable RNG state; ``temperature=0`` (the
+default) produces exact greedy decode.
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ if str(ROOT) not in sys.path:
 
 from glacial.backends import backend_names, resolve_backend
 from glacial.kv import save_decode_checkpoint
+from glacial.sampler import Sampler
 from glacial.weights import WeightBudget, read_safetensors_header
 
 
@@ -358,6 +359,7 @@ class GlacialChatEngine:
         max_tokens: int,
         request_id: str,
         response_model: str,
+        sampler: Sampler | None = None,
     ) -> Iterator[TokenEvent]:
         if max_tokens <= 0:
             return
@@ -390,6 +392,7 @@ class GlacialChatEngine:
                     messages=prepared.messages,
                     config=self.config,
                     lm_head_chunk_rows=self.lm_head_chunk_rows,
+                    sampler=sampler.to_manifest() if sampler is not None else None,
                 )
 
             def make_event(step: int, next_id: int, telemetry: dict[str, Any]) -> TokenEvent:
@@ -412,6 +415,7 @@ class GlacialChatEngine:
                 config=self.config,
                 lm_head_chunk_rows=self.lm_head_chunk_rows,
                 budget=budget,
+                sampler=sampler,
             )
             event = make_event(0, next_id, telemetry)
             yield event
@@ -430,6 +434,7 @@ class GlacialChatEngine:
                     config=self.config,
                     lm_head_chunk_rows=self.lm_head_chunk_rows,
                     budget=budget,
+                    sampler=sampler,
                 )
                 event = make_event(step, next_id, telemetry)
                 yield event
@@ -446,6 +451,7 @@ class GlacialOpenAIServer(ThreadingHTTPServer):
         self.default_max_tokens: int = kwargs.pop("default_max_tokens")
         self.max_tokens_limit: int = kwargs.pop("max_tokens_limit")
         self.max_request_bytes: int = kwargs.pop("max_request_bytes")
+        self.default_seed: int | None = kwargs.pop("default_seed")
         super().__init__(server_address, handler_class)
 
 
@@ -574,7 +580,7 @@ class OpenAICompatHandler(BaseHTTPRequestHandler):
                 {"error": {"message": str(exc), "type": "server_error", "param": None, "code": None}},
             )
 
-    def _validate_chat_request(self, body: dict[str, Any]) -> tuple[str, list[dict[str, str]], int, list[str], bool, bool]:
+    def _validate_chat_request(self, body: dict[str, Any]) -> tuple[str, list[dict[str, str]], int, list[str], bool, bool, float, float | None, int | None]:
         n = body.get("n", 1)
         if isinstance(n, bool) or not isinstance(n, int) or n != 1:
             raise OpenAIHTTPError(HTTPStatus.BAD_REQUEST, "only n=1 is supported", param="n")
@@ -604,16 +610,45 @@ class OpenAICompatHandler(BaseHTTPRequestHandler):
                 param="stream_options.include_usage",
             )
         include_usage = include_usage_raw
-        return response_model, messages, max_tokens, stop, stream, include_usage
+
+        temperature = body.get("temperature", 0.0)
+        if isinstance(temperature, bool) or not isinstance(temperature, (int, float)):
+            raise OpenAIHTTPError(HTTPStatus.BAD_REQUEST, "temperature must be a number", param="temperature")
+        temperature = float(temperature)
+        if temperature < 0:
+            raise OpenAIHTTPError(HTTPStatus.BAD_REQUEST, "temperature must be non-negative", param="temperature")
+        if temperature > 2:
+            raise OpenAIHTTPError(HTTPStatus.BAD_REQUEST, "temperature must be at most 2", param="temperature")
+
+        top_p = body.get("top_p", None)
+        if top_p is not None:
+            if isinstance(top_p, bool) or not isinstance(top_p, (int, float)):
+                raise OpenAIHTTPError(HTTPStatus.BAD_REQUEST, "top_p must be a number", param="top_p")
+            top_p = float(top_p)
+            if top_p < 0 or top_p > 1:
+                raise OpenAIHTTPError(HTTPStatus.BAD_REQUEST, "top_p must be between 0 and 1", param="top_p")
+
+        seed = body.get("seed", None)
+        if seed is not None:
+            if isinstance(seed, bool) or not isinstance(seed, int):
+                raise OpenAIHTTPError(HTTPStatus.BAD_REQUEST, "seed must be an integer", param="seed")
+
+        return response_model, messages, max_tokens, stop, stream, include_usage, temperature, top_p, seed
 
     def _handle_chat_completions(self, body: dict[str, Any]) -> None:
-        response_model, messages, max_tokens, stop, stream, include_usage = self._validate_chat_request(body)
+        response_model, messages, max_tokens, stop, stream, include_usage, temperature, top_p, seed = self._validate_chat_request(body)
         prepared = self.server.engine.prepare_chat(messages)
         request_id = "chatcmpl-" + uuid4().hex
         checkpoint_dir = self.server.engine.checkpoint_dir_for(request_id)
         headers = {}
         if checkpoint_dir is not None:
             headers["X-Glacial-Checkpoint-Dir"] = str(checkpoint_dir)
+
+        sampler = Sampler.from_params(
+            temperature=temperature,
+            top_p=top_p,
+            seed=seed if seed is not None else self.server.default_seed,
+        )
 
         if stream:
             self._stream_chat_completion(
@@ -624,6 +659,7 @@ class OpenAICompatHandler(BaseHTTPRequestHandler):
                 stop=stop,
                 include_usage=include_usage,
                 headers=headers,
+                sampler=sampler,
             )
         else:
             self._complete_chat_completion(
@@ -633,6 +669,7 @@ class OpenAICompatHandler(BaseHTTPRequestHandler):
                 max_tokens=max_tokens,
                 stop=stop,
                 headers=headers,
+                sampler=sampler,
             )
 
     def _complete_chat_completion(
@@ -644,6 +681,7 @@ class OpenAICompatHandler(BaseHTTPRequestHandler):
         max_tokens: int,
         stop: list[str],
         headers: dict[str, str],
+        sampler: Sampler | None = None,
     ) -> None:
         created = unix_now()
         stop_filter = StopFilter(stop)
@@ -656,6 +694,7 @@ class OpenAICompatHandler(BaseHTTPRequestHandler):
             max_tokens=max_tokens,
             request_id=request_id,
             response_model=response_model,
+            sampler=sampler,
         )
         try:
             for event in token_iter:
@@ -727,6 +766,7 @@ class OpenAICompatHandler(BaseHTTPRequestHandler):
         stop: list[str],
         include_usage: bool,
         headers: dict[str, str],
+        sampler: Sampler | None = None,
     ) -> None:
         created = unix_now()
         self._send_headers(
@@ -759,6 +799,7 @@ class OpenAICompatHandler(BaseHTTPRequestHandler):
             max_tokens=max_tokens,
             request_id=request_id,
             response_model=response_model,
+            sampler=sampler,
         )
         try:
             self._write_sse(chunk({"role": "assistant"}))
@@ -838,6 +879,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--enforce-weight-budget", action="store_true", help="Raise if resident weights exceed --weight-budget-bytes.")
     parser.add_argument("--checkpoint-root", type=Path, default=None, help="Optional root for per-request durable KV checkpoints.")
     parser.add_argument("--api-key", default=None, help="Optional bearer token required for /v1 endpoints.")
+    parser.add_argument("--seed", type=int, default=None, help="Default RNG seed for sampling (when request omits seed).")
     return parser.parse_args()
 
 
@@ -872,6 +914,7 @@ def main() -> int:
         default_max_tokens=args.default_max_tokens,
         max_tokens_limit=args.max_tokens_limit,
         max_request_bytes=args.max_request_bytes,
+        default_seed=args.seed,
     )
     print(
         f"Glacial OpenAI-compatible API listening on http://{args.host}:{args.port}/v1 "

@@ -26,6 +26,7 @@ if str(ROOT) not in sys.path:
 
 from glacial.backends import backend_names, resolve_backend
 from glacial.kv import load_decode_checkpoint, save_decode_checkpoint
+from glacial.sampler import Sampler
 from glacial.weights import WeightBudget
 from probe_embedding import read_safetensors_header, require_torch  # same-directory import when run as tools/*.py
 
@@ -105,6 +106,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint-dir", type=Path, default=None, help="Persist a resumable KV checkpoint after each emitted token.")
     parser.add_argument("--resume-from", type=Path, default=None, help="Resume from a Glacial KV checkpoint directory.")
     parser.add_argument("--no-stop-on-eos", action="store_true")
+    parser.add_argument("--temperature", type=float, default=0.0, help="Sampling temperature (0 = greedy).")
+    parser.add_argument("--top-k", type=int, default=None, help="Top-k sampling.")
+    parser.add_argument("--top-p", type=float, default=None, help="Top-p (nucleus) sampling.")
+    parser.add_argument("--seed", type=int, default=None, help="RNG seed for sampling.")
     parser.add_argument("--show-prompt", action="store_true")
     parser.add_argument("--show-token-telemetry", action="store_true")
     parser.add_argument("--weight-budget-bytes", type=int, default=None, help="Optional resident weight-byte budget.")
@@ -193,6 +198,29 @@ def main() -> int:
         token_ids = tokenizer(rendered_text, return_tensors=None)["input_ids"]
         prompt_token_count = len(token_ids)
 
+    # Construct the sampler.  On resume, a sampling checkpoint always restores
+    # its RNG state from the manifest (the CLI sampling args are ignored).  A
+    # greedy checkpoint falls back to the CLI sampling args so the user can
+    # start sampling from a greedy prefill if desired.
+    if checkpoint_state is not None:
+        checkpoint_sampler = Sampler.from_manifest(checkpoint_state["manifest"].get("sampler", {}))
+        if checkpoint_sampler.is_greedy():
+            sampler = Sampler.from_params(
+                temperature=args.temperature,
+                top_k=args.top_k,
+                top_p=args.top_p,
+                seed=args.seed,
+            )
+        else:
+            sampler = checkpoint_sampler
+    else:
+        sampler = Sampler.from_params(
+            temperature=args.temperature,
+            top_k=args.top_k,
+            top_p=args.top_p,
+            seed=args.seed,
+        )
+
     generated: list[int] = []
     budget = None
     if args.weight_budget_bytes is not None:
@@ -234,6 +262,7 @@ def main() -> int:
             messages=_messages,
             config=config,
             lm_head_chunk_rows=args.lm_head_chunk_rows,
+            sampler=sampler.to_manifest() if sampler is not None else None,
         )
 
     def emit_token(step: int, next_id: int, telemetry: dict[str, Any], step_started: float) -> bool:
@@ -292,6 +321,7 @@ def main() -> int:
                 config=config,
                 lm_head_chunk_rows=args.lm_head_chunk_rows,
                 budget=budget,
+                sampler=sampler,
             )
             telemetry.setdefault("phase", "full")
             if emit_token(step, next_id, telemetry, step_started):
@@ -314,6 +344,7 @@ def main() -> int:
                     config=config,
                     lm_head_chunk_rows=args.lm_head_chunk_rows,
                     budget=budget,
+                    sampler=sampler,
                 )
                 should_stop = emit_token(step, next_id, telemetry, step_started)
                 if should_stop:
@@ -330,6 +361,7 @@ def main() -> int:
                 config=config,
                 lm_head_chunk_rows=args.lm_head_chunk_rows,
                 budget=budget,
+                sampler=sampler,
             )
             should_stop = emit_token(0, next_id, telemetry, step_started)
             if not should_stop:
@@ -348,6 +380,7 @@ def main() -> int:
                         config=config,
                         lm_head_chunk_rows=args.lm_head_chunk_rows,
                         budget=budget,
+                        sampler=sampler,
                     )
                     should_stop = emit_token(step, next_id, telemetry, step_started)
                     if should_stop:

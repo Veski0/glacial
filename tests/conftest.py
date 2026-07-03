@@ -222,6 +222,7 @@ def glacial_decode(
     """
 
     from glacial.kv import load_decode_checkpoint, save_decode_checkpoint
+    from glacial.sampler import Sampler
 
     header, payload_start = safetensors_info
 
@@ -230,6 +231,7 @@ def glacial_decode(
         all_ids: list[int],
         kv_cache,
         prompt_token_count: int,
+        sampler: Sampler | None = None,
     ) -> None:
         save_decode_checkpoint(
             run_dir=checkpoint_dir,
@@ -245,6 +247,7 @@ def glacial_decode(
             messages=None,
             config=config,
             lm_head_chunk_rows=LM_HEAD_CHUNK_ROWS,
+            sampler=sampler.to_manifest() if sampler is not None else None,
         )
 
     def _decode(
@@ -255,6 +258,7 @@ def glacial_decode(
         resume_from: Path | None = None,
         stop_on_eos: bool = False,
         eos_token_id: int | None = None,
+        sampler: Sampler | None = None,
     ) -> tuple[list[int], list[int]]:
 
         if resume_from is not None:
@@ -264,6 +268,8 @@ def glacial_decode(
             kv_cache = ckpt["kv_cache"]
             prompt_token_count = int(ckpt["manifest"]["state"]["prompt_token_count"])
             generated_start = len(all_ids)
+            if sampler is None:
+                sampler = Sampler.from_manifest(ckpt["manifest"].get("sampler", {}))
 
             for _ in range(max_new_tokens):
                 position = len(all_ids) - 1
@@ -276,10 +282,11 @@ def glacial_decode(
                     payload_start=payload_start,
                     config=config,
                     lm_head_chunk_rows=LM_HEAD_CHUNK_ROWS,
+                    sampler=sampler,
                 )
                 all_ids.append(next_id)
                 if checkpoint_dir is not None:
-                    _save_checkpoint(checkpoint_dir, all_ids, kv_cache, prompt_token_count)
+                    _save_checkpoint(checkpoint_dir, all_ids, kv_cache, prompt_token_count, sampler)
                 if stop_on_eos and eos_token_id is not None and next_id == eos_token_id:
                     break
         else:
@@ -302,10 +309,11 @@ def glacial_decode(
                 payload_start=payload_start,
                 config=config,
                 lm_head_chunk_rows=LM_HEAD_CHUNK_ROWS,
+                sampler=sampler,
             )
             all_ids.append(next_id)
             if checkpoint_dir is not None:
-                _save_checkpoint(checkpoint_dir, all_ids, kv_cache, prompt_token_count)
+                _save_checkpoint(checkpoint_dir, all_ids, kv_cache, prompt_token_count, sampler)
             if stop_on_eos and eos_token_id is not None and next_id == eos_token_id:
                 return all_ids, all_ids[generated_start:]
 
@@ -321,10 +329,11 @@ def glacial_decode(
                     payload_start=payload_start,
                     config=config,
                     lm_head_chunk_rows=LM_HEAD_CHUNK_ROWS,
+                    sampler=sampler,
                 )
                 all_ids.append(next_id)
                 if checkpoint_dir is not None:
-                    _save_checkpoint(checkpoint_dir, all_ids, kv_cache, prompt_token_count)
+                    _save_checkpoint(checkpoint_dir, all_ids, kv_cache, prompt_token_count, sampler)
                 if stop_on_eos and eos_token_id is not None and next_id == eos_token_id:
                     break
 

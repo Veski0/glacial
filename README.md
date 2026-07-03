@@ -23,12 +23,13 @@ Current status: slow, exact, greedy, checkpointable, inspectable, and OpenAI-com
 - backend abstraction with a Granite adapter
 - local OpenAI-compatible `/v1/chat/completions` shim
 - integration test harness: greedy parity + resume parity against HF oracle
+- sampling (temperature, top-k, top-p) with checkpointable RNG state
 
 ## What this is not
 
 Glacial is **not** a high-throughput inference server. It is a reference/runtime prototype for latency-insensitive exact decode. One generated token may be slow; operational correctness and resumability matter more than speed.
 
-Sampling is not implemented yet. Generation is greedy argmax.
+Sampling is supported with temperature, top-k, and top-p. The RNG state is persisted in checkpoints, so sampled sequences are reproducible and resumable. ``temperature=0`` (the default) produces greedy argmax.
 
 ## Setup
 
@@ -126,7 +127,7 @@ Tests:
 
 - **greedy parity** — Glacial greedy decode == HF greedy decode, token-for-token (KV-cache and no-KV paths)
 - **resume parity** — checkpoint + resume == uninterrupted decode (single-cycle and multi-step)
-- **checkpoint inspectability** — saved checkpoints are valid and inspectable
+- **sampling** — determinism (same seed → same sequence), resume parity with RNG state, temperature-zero-equals-greedy, top-k/top-p determinism
 
 ## Project map
 
@@ -135,6 +136,7 @@ glacial/
   weights.py            safetensors byte-range loading + budget accounting
   granite.py            Granite MoE layer math
   logits.py             final norm, chunked LM head, greedy argmax
+  sampler.py            token sampler with checkpointable RNG state
   generate.py           prefill/decode generation helpers
   kv.py                 durable decode checkpoints
   backends/             backend protocol and Granite adapter
@@ -170,7 +172,7 @@ tests/
 ## Caveats
 
 - Current backend: Granite MoE only.
-- Current sampler: greedy only.
+- Current sampler: greedy + temperature/top-k/top-p with seed-in-persistence.
 - No batching or request scheduler.
 - The API shim serializes generation through one engine lock.
 - The code is a prototype; expect sharp edges.

@@ -109,6 +109,12 @@ def _print_text(summary: dict[str, Any], tokenizer, *, show_tokens: bool, max_to
     print(f"- updated: {manifest['updated_at']}")
     print(f"- prompt mode: {prompt.get('mode')}")
     print(f"- sampler: {sampler.get('type')} lm_head_chunk_rows={sampler.get('lm_head_chunk_rows')}")
+    if sampler.get('type') != 'greedy':
+        print(f"  temperature: {sampler.get('temperature')}")
+        print(f"  top_k: {sampler.get('top_k')}")
+        print(f"  top_p: {sampler.get('top_p')}")
+        print(f"  seed: {sampler.get('seed')}")
+        print(f"  rng_state: {'present' if sampler.get('rng_state') else 'null'}")
     print()
     print("## State")
     print()
