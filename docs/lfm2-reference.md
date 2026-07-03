@@ -212,42 +212,58 @@ No `logits_scaling` — raw logits.  The chunked LM head helpers
 (`chunked_last_argmax`, `chunked_last_logits`) can be used with
 `logits_scaling=1.0`.
 
-## Estimated tensor names
+## Verified tensor names (from safetensors header inspection)
+
+Total tensors: 2302.  All BF16 except `expert_bias` which is F32.
 
 ```text
-model.embed_tokens.weight                        [vocab, hidden]
-model.embedding_norm.weight                       [hidden]
+model.embed_tokens.weight                        [128000, 2048]   BF16
+model.embedding_norm.weight                       [2048]          BF16
 
-# Per attention layer (indices 2, 6, 10, 14, 18, 21):
-model.layers.{i}.operator_norm.weight             [hidden]
-model.layers.{i}.ffn_norm.weight                  [hidden]
-model.layers.{i}.self_attn.q_proj.weight         [hidden, num_heads * head_dim]
-model.layers.{i}.self_attn.k_proj.weight         [hidden, num_kv_heads * head_dim]
-model.layers.{i}.self_attn.v_proj.weight         [hidden, num_kv_heads * head_dim]
-model.layers.{i}.self_attn.out_proj.weight       [num_heads * head_dim, hidden]
-model.layers.{i}.self_attn.q_layernorm.weight    [head_dim]
-model.layers.{i}.self_attn.k_layernorm.weight    [head_dim]
+# Dense conv layer (layers 0-1):
+model.layers.{i}.operator_norm.weight             [2048]          BF16
+model.layers.{i}.ffn_norm.weight                  [2048]          BF16
+model.layers.{i}.conv.in_proj.weight              [6144, 2048]    BF16  (3 * hidden)
+model.layers.{i}.conv.out_proj.weight             [2048, 2048]    BF16
+model.layers.{i}.conv.conv.weight                 [2048, 1, 3]    BF16  (depthwise, kernel=3)
+model.layers.{i}.feed_forward.w1.weight           [7168, 2048]    BF16  (dense MLP gate)
+model.layers.{i}.feed_forward.w3.weight           [7168, 2048]    BF16  (dense MLP up)
+model.layers.{i}.feed_forward.w2.weight           [2048, 7168]    BF16  (dense MLP down)
 
-# Per conv layer (indices 0,1,3,4,5,7,8,9,...):
-model.layers.{i}.operator_norm.weight             [hidden]
-model.layers.{i}.ffn_norm.weight                  [hidden]
-model.layers.{i}.conv.in_proj.weight              [hidden, 3 * hidden]
-model.layers.{i}.conv.out_proj.weight             [hidden, hidden]
-model.layers.{i}.conv.conv.weight                 [hidden, 1, L_cache]  (depthwise)
+# Attention + MoE layer (layers 2,6,10,14,18,21):
+model.layers.{i}.operator_norm.weight             [2048]          BF16
+model.layers.{i}.ffn_norm.weight                  [2048]          BF16
+model.layers.{i}.self_attn.q_proj.weight          [2048, 2048]    BF16  (32 heads * 64)
+model.layers.{i}.self_attn.k_proj.weight          [512, 2048]     BF16  (8 kv heads * 64)
+model.layers.{i}.self_attn.v_proj.weight          [512, 2048]     BF16
+model.layers.{i}.self_attn.out_proj.weight        [2048, 2048]    BF16
+model.layers.{i}.self_attn.q_layernorm.weight     [64]            BF16
+model.layers.{i}.self_attn.k_layernorm.weight     [64]            BF16
+model.layers.{i}.feed_forward.gate.weight         [32, 2048]      BF16  (router)
+model.layers.{i}.feed_forward.expert_bias         [32]            F32   (per-expert bias)
+model.layers.{i}.feed_forward.experts.{j}.w1.weight  [1792, 2048]  BF16  (per expert)
+model.layers.{i}.feed_forward.experts.{j}.w3.weight  [1792, 2048]  BF16
+model.layers.{i}.feed_forward.experts.{j}.w2.weight  [2048, 1792]  BF16
 
-# Dense MLP (layers 0-1):
-model.layers.{i}.feed_forward.w1.weight           [intermediate, hidden]
-model.layers.{i}.feed_forward.w3.weight           [intermediate, hidden]
-model.layers.{i}.feed_forward.w2.weight           [hidden, intermediate]
-
-# MoE (layers 2-23):
-model.layers.{i}.feed_forward.gate.weight         [num_experts, hidden]  (router)
-model.layers.{i}.feed_forward.experts.gate_up_proj [num_experts, 2*intermediate, hidden]
-model.layers.{i}.feed_forward.experts.down_proj    [num_experts, hidden, intermediate]
-model.layers.{i}.feed_forward.expert_bias         [num_experts]  (if use_expert_bias)
+# Conv + MoE layer (layers 3,4,5,7,8,9,...):
+model.layers.{i}.operator_norm.weight             [2048]          BF16
+model.layers.{i}.ffn_norm.weight                  [2048]          BF16
+model.layers.{i}.conv.in_proj.weight              [6144, 2048]    BF16
+model.layers.{i}.conv.out_proj.weight             [2048, 2048]    BF16
+model.layers.{i}.conv.conv.weight                 [2048, 1, 3]    BF16
+model.layers.{i}.feed_forward.gate.weight         [32, 2048]      BF16
+model.layers.{i}.feed_forward.expert_bias         [32]            F32
+model.layers.{i}.feed_forward.experts.{j}.w1.weight  [1792, 2048]  BF16
+model.layers.{i}.feed_forward.experts.{j}.w3.weight  [1792, 2048]  BF16
+model.layers.{i}.feed_forward.experts.{j}.w2.weight  [2048, 1792]  BF16
 ```
 
-TODO: Verify actual tensor names from the safetensors header once cached.
+**Key finding**: Experts are stored as **separate per-expert w1/w2/w3 tensors**
+(like Granite's layout), NOT as the combined 3D `gate_up_proj`/`down_proj`
+that the HF `Lfm2MoeExperts` class uses internally.  This is actually closer
+to Granite's layout than expected.
+
+**Expert bias is F32**, not BF16 — important for exact reproduction.
 
 ## What we can reuse from shared code
 
@@ -264,7 +280,10 @@ TODO: Verify actual tensor names from the safetensors header once cached.
 2. **Conv state persistence** — conv layers need state in checkpoints (not KV)
 3. **Q/K layernorm** — RMSNorm on Q and K after projection
 4. **Sigmoid router** with expert bias — different routing math
-5. **Combined gate_up_proj** — expert weights are 3D tensors, not separate
+5. **Separate per-expert w1/w2/w3** — the safetensors stores experts as
+   individual tensors (like Granite), NOT the combined 3D gate_up_proj/
+   down_proj that the HF modeling code uses internally. This is actually
+   closer to Granite's layout than expected.
 6. **Dense MLP layers** — first 2 layers use standard MLP, not MoE
 7. **No multipliers** — simpler residual structure
 8. **Checkpoint format** — conv layers have state, not KV; the KV invariant
@@ -291,6 +310,7 @@ TODO: Verify actual tensor names from the safetensors header once cached.
 2. **~16.9GB model download**
 3. **Conv state in checkpoints**: The checkpoint format needs to store
    conv state for 18 layers AND KV cache for 6 layers
-4. **Expert weight layout**: 3D tensors (`[num_experts, ...]`) — need to
-   verify how `SafetensorsWeights.expert_slice` handles this vs Granite's
-   2D slices
+4. **Expert weight layout**: separate per-expert w1/w2/w3 2D tensors (like
+   Granite, NOT the combined 3D tensors the HF modeling code uses). The
+   `SafetensorsWeights.expert_slice` method should work with minor naming
+   changes. Expert bias is F32, not BF16.
