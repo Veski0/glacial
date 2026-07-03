@@ -1,6 +1,6 @@
 # Runtime/development dependencies for the Glacial prototype.
-# Transformers 4.47.0 matches the Granite 3.1 instruct config and source inspected during development.
+# Transformers 5.12+ supports both Granite MoE and LFM2 MoE architectures.
 torch>=2.2
-transformers==4.47.0
+transformers>=5.12
 huggingface_hub>=0.24
 safetensors>=0.4
