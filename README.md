@@ -22,6 +22,7 @@ Current status: slow, exact, greedy, checkpointable, inspectable, and OpenAI-com
 - checkpoint inspection CLI
 - backend abstraction with a Granite adapter
 - local OpenAI-compatible `/v1/chat/completions` shim
+- integration test harness: greedy parity + resume parity against HF oracle
 
 ## What this is not
 
@@ -35,6 +36,12 @@ Sampling is not implemented yet. Generation is greedy argmax.
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
+```
+
+For the test harness:
+
+```bash
+python -m pip install -r requirements-dev.txt
 ```
 
 The first run may download the Granite model from Hugging Face. Add `--local-files-only` once the model is cached.
@@ -103,6 +110,24 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 
 See [`docs/openai-compatible-api.md`](docs/openai-compatible-api.md) for streaming and client examples.
 
+## Test harness
+
+The test suite proves correctness against the HF oracle. Slow tests require a cached model and are skipped by default.
+
+```bash
+# fast: just collect and verify skip behavior
+python -m pytest tests/ -v
+
+# slow: full integration tests against HF (requires model cache)
+python -m pytest tests/ --runslow -v
+```
+
+Tests:
+
+- **greedy parity** — Glacial greedy decode == HF greedy decode, token-for-token (KV-cache and no-KV paths)
+- **resume parity** — checkpoint + resume == uninterrupted decode (single-cycle and multi-step)
+- **checkpoint inspectability** — saved checkpoints are valid and inspectable
+
 ## Project map
 
 ```text
@@ -119,6 +144,11 @@ tools/
   glacial_openai_server.py     OpenAI-compatible local API
   inspect_checkpoint.py        checkpoint inspector
   hf_trace_*.py, probe_*.py    development parity tools
+
+tests/
+  conftest.py                 shared fixtures (model loading, decode helpers)
+  test_greedy_parity.py       Glacial vs HF greedy parity
+  test_resume_parity.py       checkpoint/resume vs uninterrupted
 ```
 
 ## Docs

@@ -41,6 +41,7 @@ Implemented:
 ✅ checkpoint inspection CLI
 ✅ backend abstraction with Granite adapter
 ✅ local OpenAI-compatible Chat Completions shim
+✅ integration test harness (greedy parity + resume parity against HF oracle)
 ```
 
 Current package shape:
@@ -73,8 +74,8 @@ Most useful next steps:
 ```text
 1. Graceful Ctrl-C / pause messaging.
 2. Checkpoint cleanup policy, e.g. keep-last N snapshots.
-3. Resume parity smoke script / integration test.
-4. Slow integration test harness for probes.
+3. ~~Resume parity smoke script / integration test.~~ ✅ Done.
+4. ~~Slow integration test harness for probes.~~ ✅ Done (greedy + resume parity).
 5. Sampling with exact RNG/state semantics.
 6. Move Granite-specific generation helpers fully under backend module.
 7. Add a second architecture backend.

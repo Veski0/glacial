@@ -9,5 +9,8 @@ runs/
 models/
 .cache/
 
+# Test cache
+.pytest_cache/
+
 # Editor
 .ion
